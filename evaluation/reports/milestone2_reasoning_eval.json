@@ -1,0 +1,94 @@
+{
+  "total_cases": 13,
+  "passed": 7,
+  "failed": 6,
+  "by_category": {
+    "explicit": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0
+    },
+    "hyperbole": {
+      "total": 3,
+      "passed": 2,
+      "failed": 1
+    },
+    "coded": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2
+    },
+    "context": {
+      "total": 2,
+      "passed": 1,
+      "failed": 1
+    },
+    "markers": {
+      "total": 3,
+      "passed": 1,
+      "failed": 2
+    }
+  },
+  "failures": [
+    {
+      "id": "hyperbole_003",
+      "description": "Hyperbole about parental reaction",
+      "expected_risk": "safe",
+      "actual_risk": "safe",
+      "expected_sarcasm": true,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    },
+    {
+      "id": "coded_001",
+      "description": "Coded language with crisis context",
+      "expected_risk": "crisis",
+      "actual_risk": "safe",
+      "expected_sarcasm": false,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    },
+    {
+      "id": "coded_002",
+      "description": "Passive suicidal ideation",
+      "expected_risk": "crisis",
+      "actual_risk": "safe",
+      "expected_sarcasm": false,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    },
+    {
+      "id": "context_001",
+      "description": "Ambiguous message with crisis context",
+      "expected_risk": "crisis",
+      "actual_risk": "safe",
+      "expected_sarcasm": false,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    },
+    {
+      "id": "markers_002",
+      "description": "PHQ-9 Item 7: Concentration problems",
+      "expected_risk": "caution",
+      "actual_risk": "safe",
+      "expected_sarcasm": false,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    },
+    {
+      "id": "markers_003",
+      "description": "GAD-7 Item 2: Excessive worry",
+      "expected_risk": "caution",
+      "actual_risk": "safe",
+      "expected_sarcasm": false,
+      "actual_sarcasm": false,
+      "reasoning": "Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria."
+    }
+  ],
+  "metrics": {
+    "risk_accuracy": 0.6153846153846154,
+    "sarcasm_accuracy": 0.9230769230769231,
+    "marker_recall": 0.4,
+    "marker_precision": 0.4444444444444444
+  }
+}

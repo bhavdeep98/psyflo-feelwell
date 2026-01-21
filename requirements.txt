@@ -1,4 +1,4 @@
-# PsyFlo - Milestone 1 Dependencies
+# PsyFlo - Milestone 1 & 2 Dependencies
 # Python 3.11+
 
 # Core Dependencies
@@ -12,6 +12,10 @@ sentence-transformers>=2.2.2
 onnxruntime>=1.16.0
 numpy>=1.24.0
 torch>=2.1.0
+
+# Reasoning Module - Mistral-7B
+transformers>=4.36.0
+accelerate>=0.25.0
 
 # Testing & Evaluation
 pytest>=7.4.0
