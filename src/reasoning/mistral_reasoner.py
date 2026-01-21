@@ -10,15 +10,22 @@ Key Features:
 - Context-aware analysis using conversation history
 - Sarcasm/hyperbole detection for teenage vernacular
 - Clinical marker extraction (PHQ-9, GAD-7, C-SSRS)
-- Timeout protection with fallback to deterministic layer
+- Timeout protection (raises TimeoutError)
+- Fail-fast design: raises exceptions on errors (no fallbacks)
 
 Architecture:
 - Runs locally using transformers library
 - Lazy loading (model loads on first use)
-- Circuit breaker pattern for graceful degradation
 - Immutable ReasoningResult for audit trail
+- Explicit error handling (fail loud, fail early)
 
 SLA: <2s reasoning latency with 5s timeout
+
+Error Handling:
+- RuntimeError: Model fails to load or generate
+- ValueError: Response cannot be parsed
+- TimeoutError: Analysis exceeds timeout
+- No fallbacks - errors propagate to caller for explicit handling
 """
 
 from dataclasses import dataclass
@@ -203,7 +210,9 @@ Respond in JSON format:
                        Default: GRMenon/mental-mistral-7b-instruct-autotrain
                        (Fine-tuned on mental health counseling conversations)
             timeout: Maximum reasoning time in seconds (default: 5.0)
-                    After timeout, returns fallback result
+                    
+        Raises:
+            ImportError: If transformers library is not installed
                     
         Example:
             # Use default mental health model
@@ -277,7 +286,6 @@ Respond in JSON format:
         3. Call Mistral model
         4. Parse structured JSON response
         5. Validate and return ReasoningResult
-        6. On timeout/error, return fallback result
         
         Args:
             message: Student message to analyze (required)
@@ -287,9 +295,14 @@ Respond in JSON format:
         Returns:
             ReasoningResult with crisis assessment and reasoning
             
+        Raises:
+            RuntimeError: If model fails to load or generate response
+            ValueError: If model response cannot be parsed
+            TimeoutError: If analysis exceeds timeout threshold
+            
         Performance:
             - Target: <2s on GPU, <5s on CPU
-            - Timeout: 5s (returns fallback)
+            - Timeout: 5s (raises TimeoutError)
             
         Example:
             # Explicit crisis
@@ -311,53 +324,58 @@ Respond in JSON format:
         """
         start_time = time.perf_counter()
         
-        try:
-            # Load model on first use
-            self._load_model()
-            
-            # Call model
-            result = self._call_mistral(message, context)
-            
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            
-            # Update latency in result
-            result = ReasoningResult(
-                p_mistral=result.p_mistral,
-                risk_level=result.risk_level,
-                reasoning_trace=result.reasoning_trace,
-                clinical_markers=result.clinical_markers,
-                is_sarcasm=result.is_sarcasm,
-                sarcasm_reasoning=result.sarcasm_reasoning,
-                latency_ms=latency_ms,
-                model_used=self.model_name
-            )
-            
-            if result.risk_level == RiskLevel.CRISIS:
-                logger.warning(
-                    "crisis_detected_by_mistral",
-                    p_mistral=result.p_mistral,
-                    reasoning=result.reasoning_trace[:100],
-                    latency_ms=latency_ms
-                )
-            
-            return result
-            
-        except Exception as e:
+        # Load model on first use
+        self._load_model()
+        
+        # Call model
+        result = self._call_mistral(message, context)
+        
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        
+        # Check timeout
+        if latency_ms > (self.timeout * 1000):
             logger.error(
-                "mistral_reasoning_failed",
-                error=str(e),
-                message_length=len(message),
-                exc_info=True
+                "mistral_timeout_exceeded",
+                latency_ms=latency_ms,
+                timeout_ms=self.timeout * 1000,
+                message_length=len(message)
             )
-            
-            # Return safe fallback
-            return self._fallback_result(message, time.perf_counter() - start_time)
+            raise TimeoutError(
+                f"Mistral reasoning exceeded timeout: {latency_ms:.1f}ms > {self.timeout * 1000}ms"
+            )
+        
+        # Update latency in result
+        result = ReasoningResult(
+            p_mistral=result.p_mistral,
+            risk_level=result.risk_level,
+            reasoning_trace=result.reasoning_trace,
+            clinical_markers=result.clinical_markers,
+            is_sarcasm=result.is_sarcasm,
+            sarcasm_reasoning=result.sarcasm_reasoning,
+            latency_ms=latency_ms,
+            model_used=self.model_name
+        )
+        
+        if result.risk_level == RiskLevel.CRISIS:
+            logger.warning(
+                "crisis_detected_by_mistral",
+                p_mistral=result.p_mistral,
+                reasoning=result.reasoning_trace[:100],
+                latency_ms=latency_ms
+            )
+        
+        return result
     
     def _call_mistral(self, message: str, context: List[str] = None) -> ReasoningResult:
         """
         Call Mistral model for deep reasoning.
         
         Constructs structured prompt and parses JSON response.
+        
+        Raises:
+            ValueError: If model response cannot be parsed as JSON
+            KeyError: If required fields missing from response
+            RuntimeError: If model generation fails
         """
         # Build context string
         context_str = ""
@@ -392,139 +410,49 @@ Analyze this message and respond in JSON format."""
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
         # Extract JSON from response
-        try:
-            # Find JSON block in response
-            json_start = response.find('{')
-            json_end = response.rfind('}') + 1
-            
-            if json_start == -1 or json_end == 0:
-                raise ValueError("No JSON found in response")
-            
-            json_str = response[json_start:json_end]
-            data = json.loads(json_str)
-            
-            # Parse into ReasoningResult
-            return self._parse_model_response(data)
-            
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
+        # Find JSON block in response
+        json_start = response.find('{')
+        json_end = response.rfind('}') + 1
+        
+        if json_start == -1 or json_end == 0:
             logger.error(
-                "failed_to_parse_mistral_response",
+                "no_json_in_mistral_response",
+                response=response[:200]
+            )
+            raise ValueError(f"No JSON found in Mistral response. Response: {response[:200]}")
+        
+        json_str = response[json_start:json_end]
+        
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(
+                "invalid_json_from_mistral",
                 error=str(e),
-                response=response[:200],
+                json_str=json_str[:200],
                 exc_info=True
             )
-            # Fall back to keyword-based analysis
-            return self._fallback_keyword_analysis(message)
-        """
-        Mock implementation for development and testing.
+            raise ValueError(f"Invalid JSON from Mistral: {e}. JSON: {json_str[:200]}") from e
         
-        Uses simple keyword matching to simulate Mistral reasoning.
-        Replace with actual endpoint call in production.
-        """
-        message_lower = message.lower()
-        
-        # Crisis keywords (high confidence)
-        crisis_keywords = [
-            "kill myself", "end my life", "want to die", "suicide",
-            "hurt myself", "cut myself", "not worth living"
-        ]
-        
-        # Caution keywords (moderate concern)
-        caution_keywords = [
-            "depressed", "hopeless", "can't take it", "give up",
-            "anxious", "panic", "scared", "alone"
-        ]
-        
-        # Hyperbole patterns (teenage vernacular)
-        hyperbole_patterns = [
-            "homework is killing me", "dying of boredom", "literally dead",
-            "kill me now", "so dead", "i'm dead"
-        ]
-        
-        # Check for hyperbole first
-        is_sarcasm = any(pattern in message_lower for pattern in hyperbole_patterns)
-        
-        if is_sarcasm:
-            return ReasoningResult(
-                p_mistral=0.15,
-                risk_level=RiskLevel.SAFE,
-                reasoning_trace="Message contains hyperbolic teenage vernacular ('killing me', 'dead'). Context suggests frustration with schoolwork, not genuine crisis. Language is exaggerated for emphasis, common in adolescent communication.",
-                clinical_markers=[],
-                is_sarcasm=True,
-                sarcasm_reasoning="Hyperbolic language pattern detected. Phrase 'killing me' used metaphorically about homework/stress, not literal self-harm intent.",
-                latency_ms=0.0,  # Will be updated by caller
-                model_used="mock-mistral"
+        # Parse into ReasoningResult
+        try:
+            return self._parse_model_response(data)
+        except KeyError as e:
+            logger.error(
+                "missing_required_field_in_mistral_response",
+                error=str(e),
+                data=data,
+                exc_info=True
             )
-        
-        # Check for crisis keywords
-        crisis_detected = any(keyword in message_lower for keyword in crisis_keywords)
-        
-        if crisis_detected:
-            # Extract which keyword matched
-            matched = [kw for kw in crisis_keywords if kw in message_lower]
-            
-            return ReasoningResult(
-                p_mistral=0.95,
-                risk_level=RiskLevel.CRISIS,
-                reasoning_trace=f"Message contains explicit suicidal ideation: '{matched[0]}'. Language is direct and serious, not hyperbolic. No context suggests sarcasm. This requires immediate intervention per C-SSRS criteria (ideation with intent).",
-                clinical_markers=[
-                    ClinicalMarker(
-                        category="cssrs",
-                        item="suicidal_ideation",
-                        confidence=0.95,
-                        evidence=message[:100]
-                    ),
-                    ClinicalMarker(
-                        category="phq9",
-                        item="item_9_self_harm_thoughts",
-                        confidence=0.90,
-                        evidence=message[:100]
-                    )
-                ],
-                is_sarcasm=False,
-                sarcasm_reasoning="Language is direct and serious. No indicators of hyperbole or sarcasm.",
-                latency_ms=0.0,
-                model_used="mock-mistral"
-            )
-        
-        # Check for caution keywords
-        caution_detected = any(keyword in message_lower for keyword in caution_keywords)
-        
-        if caution_detected:
-            matched = [kw for kw in caution_keywords if kw in message_lower]
-            
-            return ReasoningResult(
-                p_mistral=0.65,
-                risk_level=RiskLevel.CAUTION,
-                reasoning_trace=f"Message indicates emotional distress: '{matched[0]}'. Suggests symptoms of depression or anxiety per PHQ-9/GAD-7 criteria. Not immediate crisis, but warrants counselor check-in within 24-48 hours to assess trajectory.",
-                clinical_markers=[
-                    ClinicalMarker(
-                        category="phq9",
-                        item="item_2_feeling_down",
-                        confidence=0.70,
-                        evidence=message[:100]
-                    )
-                ],
-                is_sarcasm=False,
-                sarcasm_reasoning="Language suggests genuine emotional distress, not hyperbole.",
-                latency_ms=0.0,
-                model_used="mock-mistral"
-            )
-        
-        # Default: safe
-        return ReasoningResult(
-            p_mistral=0.10,
-            risk_level=RiskLevel.SAFE,
-            reasoning_trace="Message does not contain crisis indicators or significant distress markers. Conversation appears routine. No clinical markers detected per PHQ-9, GAD-7, or C-SSRS criteria.",
-            clinical_markers=[],
-            is_sarcasm=False,
-            sarcasm_reasoning="No hyperbolic language detected.",
-            latency_ms=0.0,
-            model_used="mock-mistral"
-        )
+            raise ValueError(f"Missing required field in Mistral response: {e}. Data: {data}") from e
     
     def _parse_model_response(self, data: Dict) -> ReasoningResult:
-        """Parse model JSON response into ReasoningResult."""
+        """
+        Parse model JSON response into ReasoningResult.
+        
+        Raises:
+            KeyError: If required fields are missing from response
+        """
         # Extract clinical markers
         markers = []
         for marker_data in data.get("clinical_markers", []):
@@ -553,138 +481,4 @@ Analyze this message and respond in JSON format."""
             latency_ms=0.0,  # Will be updated by caller
             model_used=self.model_name
         )
-    
-    def _fallback_keyword_analysis(self, message: str) -> ReasoningResult:
-        """
-        Fallback keyword-based analysis when model fails or response can't be parsed.
-        
-        Uses simple keyword matching as safety net.
-        """
-        message_lower = message.lower()
-        
-        # Crisis keywords (high confidence)
-        crisis_keywords = [
-            "kill myself", "end my life", "want to die", "suicide",
-            "hurt myself", "cut myself", "not worth living"
-        ]
-        
-        # Caution keywords (moderate concern)
-        caution_keywords = [
-            "depressed", "hopeless", "can't take it", "give up",
-            "anxious", "panic", "scared", "alone"
-        ]
-        
-        # Hyperbole patterns (teenage vernacular)
-        hyperbole_patterns = [
-            "homework is killing me", "dying of boredom", "literally dead",
-            "kill me now", "so dead", "i'm dead"
-        ]
-        
-        # Check for hyperbole first
-        is_sarcasm = any(pattern in message_lower for pattern in hyperbole_patterns)
-        
-        if is_sarcasm:
-            return ReasoningResult(
-                p_mistral=0.15,
-                risk_level=RiskLevel.SAFE,
-                reasoning_trace="Message contains hyperbolic teenage vernacular. Context suggests frustration with schoolwork, not genuine crisis. Language is exaggerated for emphasis.",
-                clinical_markers=[],
-                is_sarcasm=True,
-                sarcasm_reasoning="Hyperbolic language pattern detected. Phrase used metaphorically, not literal self-harm intent.",
-                latency_ms=0.0,
-                model_used="fallback-keywords"
-            )
-        
-        # Check for crisis keywords
-        crisis_detected = any(keyword in message_lower for keyword in crisis_keywords)
-        
-        if crisis_detected:
-            matched = [kw for kw in crisis_keywords if kw in message_lower]
-            
-            return ReasoningResult(
-                p_mistral=0.95,
-                risk_level=RiskLevel.CRISIS,
-                reasoning_trace=f"Message contains explicit suicidal ideation: '{matched[0]}'. Language is direct and serious, not hyperbolic. Requires immediate intervention per C-SSRS criteria.",
-                clinical_markers=[
-                    ClinicalMarker(
-                        category="cssrs",
-                        item="suicidal_ideation",
-                        confidence=0.95,
-                        evidence=message[:100]
-                    ),
-                    ClinicalMarker(
-                        category="phq9",
-                        item="item_9_self_harm_thoughts",
-                        confidence=0.90,
-                        evidence=message[:100]
-                    )
-                ],
-                is_sarcasm=False,
-                sarcasm_reasoning="Language is direct and serious. No indicators of hyperbole or sarcasm.",
-                latency_ms=0.0,
-                model_used="fallback-keywords"
-            )
-        
-        # Check for caution keywords
-        caution_detected = any(keyword in message_lower for keyword in caution_keywords)
-        
-        if caution_detected:
-            matched = [kw for kw in caution_keywords if kw in message_lower]
-            
-            return ReasoningResult(
-                p_mistral=0.65,
-                risk_level=RiskLevel.CAUTION,
-                reasoning_trace=f"Message indicates emotional distress: '{matched[0]}'. Suggests symptoms of depression or anxiety. Not immediate crisis, but warrants counselor check-in within 24-48 hours.",
-                clinical_markers=[
-                    ClinicalMarker(
-                        category="phq9",
-                        item="item_2_feeling_down",
-                        confidence=0.70,
-                        evidence=message[:100]
-                    )
-                ],
-                is_sarcasm=False,
-                sarcasm_reasoning="Language suggests genuine emotional distress, not hyperbole.",
-                latency_ms=0.0,
-                model_used="fallback-keywords"
-            )
-        
-        # Default: safe
-        return ReasoningResult(
-            p_mistral=0.10,
-            risk_level=RiskLevel.SAFE,
-            reasoning_trace="Message does not contain crisis indicators or significant distress markers. Conversation appears routine.",
-            clinical_markers=[],
-            is_sarcasm=False,
-            sarcasm_reasoning="No hyperbolic language detected.",
-            latency_ms=0.0,
-            model_used="fallback-keywords"
-        )
-    
-    def _fallback_result(self, message: str, elapsed_time: float) -> ReasoningResult:
-        """
-        Return safe fallback result when Mistral fails or times out.
-        
-        Fallback strategy:
-        - Assume SAFE unless obvious crisis keywords present
-        - Log failure for monitoring
-        - Deterministic layer (regex) will still catch explicit crisis
-        """
-        latency_ms = elapsed_time * 1000
-        
-        logger.warning(
-            "mistral_fallback_triggered",
-            latency_ms=latency_ms,
-            message="Returning safe fallback due to timeout/error"
-        )
-        
-        return ReasoningResult(
-            p_mistral=0.0,
-            risk_level=RiskLevel.SAFE,
-            reasoning_trace="Mistral reasoning unavailable (timeout/error). Fallback to deterministic layer for crisis detection.",
-            clinical_markers=[],
-            is_sarcasm=False,
-            sarcasm_reasoning="Unable to assess sarcasm due to model unavailability.",
-            latency_ms=latency_ms,
-            model_used="fallback"
-        )
+
