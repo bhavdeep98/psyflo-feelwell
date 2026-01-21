@@ -1,0 +1,72 @@
+@startuml Message Flow Example
+
+title Crisis Detection Flow - "I want to die"
+
+actor Student
+participant "Web UI" as UI
+participant "Orchestrator" as Orch
+participant "Safety Service\n(Regex + Semantic)" as Safety
+participant "MistralReasoner\n(GRMenon/mental-mistral-7b)" as Mistral
+participant "Local LLM\n(Response Gen)" as LLM
+database "SQLite" as DB
+
+== Message Submission ==
+Student -> UI: Types: "I want to die"
+UI -> Orch: POST /chat\n{message, session_id}
+
+== Parallel Analysis (Milestone 1 + 2) ==
+group Parallel Processing
+  Orch -> Safety: analyze(message)
+  activate Safety
+  
+  Orch -> Mistral: analyze(message, context)
+  activate Mistral
+  
+  Orch -> LLM: generate_response(message)
+  activate LLM
+end
+
+== Safety Service Results ==
+Safety -> Safety: Regex: "want to die" → MATCH
+Safety -> Safety: Semantic: embedding similarity → 0.88
+Safety -> Safety: Sarcasm: not hyperbole → False
+Safety --> Orch: **P_regex=0.95, P_semantic=0.88**\nCRISIS detected\nlatency: 12ms
+deactivate Safety
+
+== Mistral Reasoning Results ==
+Mistral -> Mistral: Load GRMenon/mental-mistral-7b
+Mistral -> Mistral: Generate reasoning trace
+Mistral -> Mistral: Extract clinical markers:\n- C-SSRS: suicidal_ideation\n- PHQ-9: item_9
+Mistral --> Orch: **P_mistral=0.95**\nCRISIS\nreasoning: "Explicit suicidal ideation..."\nlatency: 1850ms
+deactivate Mistral
+
+== LLM Response Generation ==
+LLM -> LLM: Generate empathetic response
+LLM --> Orch: "I hear you're in pain..."
+deactivate LLM
+
+== Consensus Decision ==
+Orch -> Orch: Calculate consensus:\nS_c = (0.4 × 0.95) + (0.3 × 0.88) + (0.3 × 0.95)\nS_c = 0.929 → **CRISIS**
+
+alt Crisis Detected (S_c ≥ 0.90)
+  Orch -> Orch: OVERRIDE LLM response
+  Orch -> UI: **CRISIS PROTOCOL**\n+ Crisis resources\n+ Reasoning trace\n+ Clinical markers
+  UI -> Student: Display:\n"I'm concerned about what you shared.\nHere are immediate resources:\n- Crisis Hotline: 988\n- Text HOME to 741741"
+else Safe/Caution
+  Orch -> UI: LLM response + risk level
+  UI -> Student: Display empathetic response
+end
+
+== Data Persistence ==
+Orch -> DB: INSERT conversation\n(session_id, message, risk_score,\nreasoning_trace, clinical_markers)
+DB --> Orch: saved
+
+note over Student, DB
+  **Total Latency**: ~2s
+  - Safety: 12ms
+  - Mistral: 1850ms
+  - LLM: 800ms (parallel)
+  - Orchestrator: 50ms
+end note
+
+@enduml

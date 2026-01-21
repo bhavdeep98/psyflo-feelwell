@@ -1,0 +1,86 @@
+@startuml Local Prototype Setup
+
+!define LOCAL_COLOR #E8F4F8
+
+title PsyFlo Local Prototype - All Components Running Locally
+
+package "Local Development Environment" LOCAL_COLOR {
+  
+  component "Web Browser" as Browser {
+    [React UI\nhttp://localhost:3000] as UI
+  }
+  
+  component "Backend Services\nPython 3.11+" as Backend {
+    [FastAPI Server\nhttp://localhost:8000] as API
+    
+    package "Safety Service" {
+      [Regex Detector\nRE2] as Regex
+      [Semantic Detector\nall-MiniLM-L6-v2\nONNX Runtime] as Semantic
+      [Sarcasm Filter\nDistilBERT] as Sarcasm
+    }
+    
+    package "Reasoning Service" {
+      [MistralReasoner\nGRMenon/mental-mistral-7b\ntransformers + torch] as Mistral
+      [Clinical Metrics] as Metrics
+    }
+    
+    package "LLM Service (Future)" {
+      [Local LLM\nLlama-3-8B or\nMistral-7B-Instruct] as LLM
+    }
+    
+    [Chat Orchestrator] as Orch
+  }
+  
+  database "Local Database" as DB {
+    [SQLite\nor\nPostgreSQL] as SQL
+  }
+  
+  folder "Model Cache\n~/.cache/huggingface" as Cache {
+    file "all-MiniLM-L6-v2\n80MB" as Model1
+    file "GRMenon/mental-mistral-7b\n14GB" as Model2
+    file "distilbert-base\n250MB" as Model3
+  }
+}
+
+' Connections
+Browser --> API : HTTP requests
+API --> Orch : route messages
+Orch --> Regex : parallel
+Orch --> Semantic : parallel
+Orch --> Mistral : parallel
+Orch --> LLM : parallel
+Regex --> Sarcasm
+Semantic --> Sarcasm
+Orch --> SQL : persist
+Semantic ..> Model1 : loads
+Mistral ..> Model2 : loads
+Sarcasm ..> Model3 : loads
+
+note right of Cache
+  **First Run:**
+  Models download from HuggingFace
+  Total: ~15GB
+  
+  **Subsequent Runs:**
+  Load from local cache
+end note
+
+note right of Mistral
+  **Hardware Requirements:**
+  - CPU: Works but slow (30-60s)
+  - GPU: Recommended (1-2s)
+  - RAM: 16GB minimum
+  - VRAM: 8GB+ for GPU
+end note
+
+note bottom of Backend
+  **Start Command:**
+  python -m uvicorn main:app --reload
+  
+  **Environment:**
+  - Python 3.11+
+  - pip install -r requirements.txt
+  - transformers, torch, fastapi
+end note
+
+@enduml
