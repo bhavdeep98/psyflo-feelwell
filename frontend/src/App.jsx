@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import StudentChat from './components/StudentChat'
 import CounselorDashboard from './components/CounselorDashboard'
+import ConsensusDemo from './components/ConsensusDemo'
 import './App.css'
 
 function App() {
-  const [view, setView] = useState('student') // 'student' or 'counselor'
+  const [view, setView] = useState('demo') // 'demo', 'student' or 'counselor'
 
   return (
     <div className="app">
@@ -12,6 +13,12 @@ function App() {
         <h1>PsyFlo</h1>
         <p className="tagline">Mental Health Support</p>
         <div className="view-toggle">
+          <button 
+            className={view === 'demo' ? 'active' : ''}
+            onClick={() => setView('demo')}
+          >
+            🧠 Consensus Demo
+          </button>
           <button 
             className={view === 'student' ? 'active' : ''}
             onClick={() => setView('student')}
@@ -28,12 +35,16 @@ function App() {
       </header>
 
       <main className="app-main">
-        {view === 'student' ? <StudentChat /> : <CounselorDashboard />}
+        {view === 'demo' && <ConsensusDemo />}
+        {view === 'student' && <StudentChat />}
+        {view === 'counselor' && <CounselorDashboard />}
       </main>
 
-      <footer className="app-footer">
-        <p>🆘 Crisis? Call 988 or text HOME to 741741</p>
-      </footer>
+      {view !== 'demo' && (
+        <footer className="app-footer">
+          <p>🆘 Crisis? Call 988 or text HOME to 741741</p>
+        </footer>
+      )}
     </div>
   )
 }
