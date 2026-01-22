@@ -13,15 +13,21 @@ from typing import List, Optional
 import structlog
 import hashlib
 import sys
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.database import get_db, init_db, Conversation, CrisisEvent
 from src.orchestrator import ConsensusOrchestrator, ConsensusConfig
-from src.safety.safety_analyzer import SafetyAnalyzer
+from src.safety.safety_analyzer import SafetyService
 from src.reasoning.mistral_reasoner import MistralReasoner
+from src.conversation import ConversationAgent, ConversationContext
 
 # Initialize logging
 logger = structlog.get_logger()
@@ -36,7 +42,7 @@ app = FastAPI(
 # CORS middleware (allow frontend to connect)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:3002"],  # React dev servers
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +52,7 @@ app.add_middleware(
 safety_analyzer = None
 mistral_reasoner = None
 orchestrator = None
+conversation_agent = None
 
 
 def hash_pii(pii: str) -> str:
@@ -56,7 +63,7 @@ def hash_pii(pii: str) -> str:
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global safety_analyzer, mistral_reasoner, orchestrator
+    global safety_analyzer, mistral_reasoner, orchestrator, conversation_agent
     
     logger.info("initializing_services")
     
@@ -66,8 +73,10 @@ async def startup_event():
     
     # Initialize services
     try:
-        safety_analyzer = SafetyAnalyzer()
-        logger.info("safety_analyzer_initialized")
+        # Path to config from backend directory
+        config_path = Path(__file__).parent.parent / "config" / "crisis_patterns.yaml"
+        safety_analyzer = SafetyService(patterns_path=str(config_path))
+        logger.info("safety_service_initialized")
         
         mistral_reasoner = MistralReasoner()
         logger.info("mistral_reasoner_initialized")
@@ -78,6 +87,21 @@ async def startup_event():
             config=ConsensusConfig()
         )
         logger.info("orchestrator_initialized")
+        
+        # Initialize conversation agent
+        # Tenet #4: Fail loud if API key missing
+        # Tenet #11: Service will handle graceful degradation via circuit breaker
+        try:
+            conversation_agent = ConversationAgent()
+            logger.info("conversation_agent_initialized")
+        except RuntimeError as e:
+            logger.error(
+                "conversation_agent_initialization_failed",
+                error=str(e),
+                exc_info=True
+            )
+            # Re-raise - service cannot start without conversation agent
+            raise
         
     except Exception as e:
         logger.error("service_initialization_failed", error=str(e), exc_info=True)
@@ -168,12 +192,39 @@ async def chat(
             session_id=request.session_id
         )
         
-        # Generate response based on risk level
+        # Generate response using conversation agent
+        # Tenet #1: Crisis detection already done, now generate appropriate response
         if result.is_crisis():
+            # Crisis override - hard-coded protocol
             response_text = _get_crisis_response()
         else:
-            # TODO: Integrate LLM for empathetic response
-            response_text = _get_fallback_response(request.message)
+            # Generate empathetic response using LLM
+            # Build conversation context
+            conversation_history = _get_conversation_history(db, session_id_hash, limit=5)
+            
+            context = ConversationContext(
+                session_id=request.session_id,
+                risk_level=result.risk_level.value,
+                risk_score=result.final_score,
+                matched_patterns=result.matched_patterns,
+                conversation_history=conversation_history
+            )
+            
+            try:
+                response_text = await conversation_agent.generate_response(
+                    message=request.message,
+                    context=context
+                )
+            except Exception as e:
+                # Tenet #11: Graceful degradation - LLM service failure
+                logger.error(
+                    "conversation_agent_failed",
+                    session_id=session_id_hash,
+                    error=str(e),
+                    exc_info=True
+                )
+                # Display crisis resources directly to student
+                response_text = _get_service_unavailable_response()
         
         # Save to database
         conversation = Conversation(
@@ -276,6 +327,39 @@ async def get_conversations(
     ]
 
 
+@app.get("/conversations/lookup/{session_id_hash}", response_model=List[ConversationDetail])
+async def get_conversations_by_hash(
+    session_id_hash: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get conversation history by direct hash lookup (for internal/dashboard use).
+    """
+    conversations = db.query(Conversation).filter(
+        Conversation.session_id_hash == session_id_hash
+    ).order_by(Conversation.created_at.desc()).limit(50).all()
+    
+    return [
+        ConversationDetail(
+            id=conv.id,
+            session_id_hash=conv.session_id_hash,
+            message=conv.message,
+            response=conv.response,
+            risk_level=conv.risk_level,
+            risk_score=conv.risk_score,
+            regex_score=conv.regex_score,
+            semantic_score=conv.semantic_score,
+            mistral_score=conv.mistral_score,
+            reasoning=conv.reasoning,
+            matched_patterns=conv.matched_patterns,
+            latency_ms=conv.latency_ms,
+            timeout_occurred=bool(conv.timeout_occurred),
+            created_at=conv.created_at.isoformat()
+        )
+        for conv in conversations
+    ]
+
+
 @app.get("/crisis-events", response_model=List[dict])
 async def get_crisis_events(
     limit: int = 100,
@@ -311,34 +395,51 @@ def _get_crisis_response() -> str:
     )
 
 
-def _get_fallback_response(message: str) -> str:
+def _get_service_unavailable_response() -> str:
     """
-    Get fallback response when LLM not available.
+    Response when conversation service is temporarily unavailable.
     
-    Tenet #11: Graceful Degradation
+    Tenet #11: Graceful degradation - show crisis resources
     """
-    # Simple rule-based responses
-    message_lower = message.lower()
+    return (
+        "I'm having trouble connecting right now, but I want to make sure you have support.\n\n"
+        "If you need to talk to someone immediately:\n\n"
+        "🆘 National Suicide Prevention Lifeline: 988\n"
+        "💬 Crisis Text Line: Text HOME to 741741\n"
+        "🌐 Online Chat: https://suicidepreventionlifeline.org/chat/\n\n"
+        "Your school counselor is also available. Please reach out - you're not alone."
+    )
+
+
+def _get_conversation_history(
+    db: Session,
+    session_id_hash: str,
+    limit: int = 5
+) -> list[dict]:
+    """
+    Get recent conversation history for context.
     
-    if any(word in message_lower for word in ["sad", "down", "depressed"]):
-        return (
-            "I hear that you're feeling down. That must be really difficult. "
-            "Would you like to tell me more about what's been going on?"
-        )
-    elif any(word in message_lower for word in ["anxious", "worried", "stressed"]):
-        return (
-            "It sounds like you're dealing with a lot of stress. "
-            "That can be really overwhelming. What's been weighing on your mind?"
-        )
-    elif any(word in message_lower for word in ["tired", "exhausted", "sleep"]):
-        return (
-            "It sounds like you're really tired. Sleep and energy issues can affect everything. "
-            "How long have you been feeling this way?"
-        )
-    else:
-        return (
-            "I'm here to listen. Can you tell me more about what's going on?"
-        )
+    Args:
+        db: Database session
+        session_id_hash: Hashed session ID
+        limit: Number of recent messages to retrieve
+        
+    Returns:
+        List of conversation messages with role and content
+    """
+    conversations = db.query(Conversation).filter(
+        Conversation.session_id_hash == session_id_hash
+    ).order_by(Conversation.created_at.desc()).limit(limit).all()
+    
+    # Reverse to get chronological order
+    conversations = list(reversed(conversations))
+    
+    history = []
+    for conv in conversations:
+        history.append({"role": "student", "content": conv.message})
+        history.append({"role": "assistant", "content": conv.response})
+    
+    return history
 
 
 if __name__ == "__main__":

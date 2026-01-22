@@ -13,5 +13,4 @@ python-dotenv==1.0.0
 # Logging
 structlog==23.2.0
 
-# CORS
-python-cors==1.0.0
+# CORS (included in FastAPI, no separate package needed)

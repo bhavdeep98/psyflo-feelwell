@@ -22,7 +22,7 @@ Usage:
         send_alert(result)
 """
 
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 import structlog
 
@@ -31,6 +31,13 @@ from .strategy_factory import SafetyAnalyzerFactory
 
 logger = structlog.get_logger()
 
+
+@dataclass
+class StrategyAnalysisResult:
+    """Result from a single strategy analysis."""
+    confidence: float
+    matched_patterns: List[str]
+    evidence: Optional[str] = None
 
 @dataclass(frozen=True)
 class SafetyResult:
@@ -257,7 +264,7 @@ class SafetyService:
         
         return result
     
-    def analyze_regex(self, message: str, context: List[str] = None) -> float:
+    async def analyze_regex(self, message: str, context: List[str] = None) -> StrategyAnalysisResult:
         """
         Analyze using only regex strategy (deterministic layer).
         
@@ -271,19 +278,16 @@ class SafetyService:
             context: Optional previous messages (not used by regex)
             
         Returns:
-            Regex confidence score (0.0-1.0)
+            StrategyAnalysisResult with confidence score and matched patterns
             
         Example:
-            score = service.analyze_regex("I want to die")
-            # score == 0.95 (suicidal_ideation pattern matched)
-            
-            score = service.analyze_regex("I'm sad")
-            # score == 0.0 (no explicit crisis keywords)
+            result = await service.analyze_regex("I want to die")
+            # result.confidence == 0.95 (suicidal_ideation pattern matched)
         """
-        score, _ = self.strategy_map['regex'].analyze(message, context)
-        return score
+        score, patterns = self.strategy_map['regex'].analyze(message, context)
+        return StrategyAnalysisResult(confidence=score, matched_patterns=patterns)
     
-    def analyze_semantic(self, message: str, context: List[str] = None) -> float:
+    async def analyze_semantic(self, message: str, context: List[str] = None) -> StrategyAnalysisResult:
         """
         Analyze using only semantic strategy (embedding similarity).
         
@@ -297,7 +301,7 @@ class SafetyService:
             context: Optional previous messages (last 3 used for context)
             
         Returns:
-            Semantic confidence score (0.0-1.0)
+            StrategyAnalysisResult with confidence score and matched patterns
             
         Note:
             Context significantly improves semantic accuracy.
@@ -306,15 +310,16 @@ class SafetyService:
             
         Example:
             # Without context
-            score = service.analyze_semantic("I'm checking out early")
-            # score ~0.6 (ambiguous)
+            result = await service.analyze_semantic("I'm checking out early")
+            # result.confidence ~0.6 (ambiguous)
             
             # With context
-            score = service.analyze_semantic(
+            result = await service.analyze_semantic(
                 "I'm checking out early",
                 context=["I can't take it", "Everything is hopeless"]
             )
-            # score ~0.85 (crisis context clarifies intent)
+            # result.confidence ~0.85 (crisis context clarifies intent)
         """
-        score, _ = self.strategy_map['semantic'].analyze(message, context)
-        return score
+        score, patterns = self.strategy_map['semantic'].analyze(message, context)
+        return StrategyAnalysisResult(confidence=score, matched_patterns=patterns)
+

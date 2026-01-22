@@ -10,9 +10,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from backend directory
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # Database URL from environment
 DATABASE_URL = os.getenv(
@@ -20,12 +23,15 @@ DATABASE_URL = os.getenv(
     "sqlite:///./psyflo.db"  # Default to SQLite for prototype
 )
 
+print(f"[DATABASE] Using DATABASE_URL: {DATABASE_URL}")  # Debug
+
 # Create engine
 engine = create_engine(
     DATABASE_URL,
     echo=False,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )
+
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

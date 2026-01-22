@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PsyFlo Consensus Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .input-section {
+            margin-bottom: 20px;
+        }
+
+        .input-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .examples {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .example-btn {
+            padding: 12px;
+            text-align: left;
+            background: white;
+            border: 2px solid #e0e0e0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-btn:hover:not(:disabled) {
+            border-color: #667eea;
+            transform: translateX(5px);
+        }
+
+        .example-btn.crisis {
+            border-left: 4px solid #dc3545;
+        }
+
+        .example-btn.caution {
+            border-left: 4px solid #ffc107;
+        }
+
+        .example-btn.safe {
+            border-left: 4px solid #28a745;
+        }
+
+        .example-text {
+            display: block;
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .results-panel {
+            max-height: calc(100vh - 180px);
+            overflow-y: auto;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .result {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .message-box {
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            border-radius: 8px;
+            font-size: 1.1rem;
+        }
+
+        .verdict {
+            padding: 25px;
+            border-radius: 12px;
+            border: 3px solid;
+            background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,249,250,0.9) 100%);
+        }
+
+        .verdict-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .verdict-icon {
+            font-size: 2.5rem;
+        }
+
+        .verdict-score {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .score-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .crisis-badge {
+            margin-top: 15px;
+            padding: 10px;
+            background: #dc3545;
+            color: white;
+            text-align: center;
+            border-radius: 8px;
+            font-weight: bold;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .component-card {
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+            background: #fafafa;
+            margin-bottom: 15px;
+        }
+
+        .component-card.regex { border-left: 5px solid #007bff; }
+        .component-card.semantic { border-left: 5px solid #17a2b8; }
+        .component-card.mistral { border-left: 5px solid #6f42c1; }
+
+        .component-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .component-icon {
+            font-size: 1.5rem;
+        }
+
+        .component-header h4 {
+            flex: 1;
+            font-size: 1.1rem;
+        }
+
+        .component-weight {
+            font-size: 0.9rem;
+            color: #666;
+            background: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+
+        .score-bar {
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .score-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        .regex-fill { background: linear-gradient(90deg, #007bff, #0056b3); }
+        .semantic-fill { background: linear-gradient(90deg, #17a2b8, #117a8b); }
+        .mistral-fill { background: linear-gradient(90deg, #6f42c1, #5a32a3); }
+
+        .pattern-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .pattern-tag {
+            padding: 4px 12px;
+            background: #007bff;
+            color: white;
+            border-radius: 12px;
+            font-size: 0.85rem;
+        }
+
+        .reasoning-box {
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #6f42c1;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .response-box {
+            padding: 20px;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border-radius: 10px;
+            border: 2px solid #667eea;
+            line-height: 1.8;
+        }
+
+        @media (max-width: 1200px) {
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 PsyFlo Consensus Demo</h1>
+            <p>Watch the 3-way consensus in action: Regex + Semantic + Mistral</p>
+        </div>
+
+        <div class="demo-grid">
+            <!-- Left Panel -->
+            <div class="panel">
+                <div class="input-section">
+                    <h3>Test Message</h3>
+                    <textarea id="messageInput" rows="4" placeholder="Type a message to analyze..."></textarea>
+                    <button id="sendBtn" onclick="sendMessage()">Analyze Message</button>
+                </div>
+
+                <div class="input-section">
+                    <h3>Quick Examples</h3>
+                    <div class="examples">
+                        <button class="example-btn crisis" onclick="sendExample('I want to kill myself')">
+                            🚨 Crisis
+                            <span class="example-text">I want to kill myself</span>
+                        </button>
+                        <button class="example-btn crisis" onclick="sendExample('I\'m going to end my life tonight')">
+                            🚨 Crisis with Plan
+                            <span class="example-text">I'm going to end my life tonight</span>
+                        </button>
+                        <button class="example-btn caution" onclick="sendExample('I feel hopeless and worthless')">
+                            ⚠️ Caution
+                            <span class="example-text">I feel hopeless and worthless</span>
+                        </button>
+                        <button class="example-btn caution" onclick="sendExample('I can\'t sleep and nothing matters anymore')">
+                            ⚠️ Depression
+                            <span class="example-text">I can't sleep and nothing matters anymore</span>
+                        </button>
+                        <button class="example-btn safe" onclick="sendExample('This homework is killing me')">
+                            ✅ Hyperbole
+                            <span class="example-text">This homework is killing me</span>
+                        </button>
+                        <button class="example-btn safe" onclick="sendExample('I\'m stressed about exams')">
+                            ✅ Stress
+                            <span class="example-text">I'm stressed about exams</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel -->
+            <div class="panel results-panel" id="resultsPanel">
+                <div class="empty-state">
+                    <h2>👈 Send a message to see the consensus in action</h2>
+                    <p>The system will analyze it using three strategies and show you how they vote.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sessionId = 'demo-session-' + Date.now();
+
+        function sendExample(text) {
+            document.getElementById('messageInput').value = text;
+            sendMessage();
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+
+            const resultsPanel = document.getElementById('resultsPanel');
+            const sendBtn = document.getElementById('sendBtn');
+            
+            sendBtn.disabled = true;
+            resultsPanel.innerHTML = '<div class="loading"><div class="spinner"></div><p>Analyzing with 3-way consensus...</p></div>';
+
+            try {
+                const response = await fetch('http://localhost:8000/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, message: message })
+                });
+
+                if (!response.ok) throw new Error('Failed to send message');
+
+                const data = await response.json();
+                
+                // Fetch detailed conversation
+                const convResponse = await fetch(`http://localhost:8000/conversations/${sessionId}`);
+                const conversations = await convResponse.json();
+                const details = conversations[0];
+
+                displayResults(message, data, details);
+                messageInput.value = '';
+            } catch (error) {
+                console.error('Error:', error);
+                resultsPanel.innerHTML = '<div class="empty-state"><h2>❌ Error</h2><p>Failed to connect to backend. Make sure it\'s running on http://localhost:8000</p></div>';
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function displayResults(message, data, details) {
+            const riskColors = {
+                'CRISIS': '#dc3545',
+                'CAUTION': '#ffc107',
+                'SAFE': '#28a745'
+            };
+
+            const riskIcons = {
+                'CRISIS': '🚨',
+                'CAUTION': '⚠️',
+                'SAFE': '✅'
+            };
+
+            const html = `
+                <div class="result">
+                    <div>
+                        <h3>Message Analyzed</h3>
+                        <div class="message-box">${message}</div>
+                    </div>
+
+                    <div class="verdict" style="border-color: ${riskColors[data.risk_level]}">
+                        <div class="verdict-header">
+                            <span class="verdict-icon">${riskIcons[data.risk_level]}</span>
+                            <h2>Final Risk Level: ${data.risk_level}</h2>
+                        </div>
+                        <div class="verdict-score">
+                            <div>Consensus Score</div>
+                            <div class="score-value" style="color: ${riskColors[data.risk_level]}">
+                                ${(details.risk_score * 100).toFixed(1)}%
+                            </div>
+                        </div>
+                        ${data.is_crisis ? '<div class="crisis-badge">⚠️ CRISIS PROTOCOL ACTIVATED</div>' : ''}
+                    </div>
+
+                    <div>
+                        <h3>Component Analysis</h3>
+                        
+                        <div class="component-card regex">
+                            <div class="component-header">
+                                <span class="component-icon">🔍</span>
+                                <h4>Regex Detection</h4>
+                                <span class="component-weight">Weight: 40%</span>
+                            </div>
+                            <div class="score-bar">
+                                <div class="score-fill regex-fill" style="width: ${details.regex_score * 100}%"></div>
+                            </div>
+                            <strong>${(details.regex_score * 100).toFixed(1)}%</strong>
+                            ${details.matched_patterns && details.matched_patterns.length > 0 ? `
+                                <div style="margin-top: 10px">
+                                    <strong>Matched Patterns:</strong>
+                                    <div class="pattern-tags">
+                                        ${details.matched_patterns.map(p => `<span class="pattern-tag">${p}</span>`).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="component-card semantic">
+                            <div class="component-header">
+                                <span class="component-icon">🧬</span>
+                                <h4>Semantic Analysis</h4>
+                                <span class="component-weight">Weight: 20%</span>
+                            </div>
+                            <div class="score-bar">
+                                <div class="score-fill semantic-fill" style="width: ${details.semantic_score * 100}%"></div>
+                            </div>
+                            <strong>${(details.semantic_score * 100).toFixed(1)}%</strong>
+                            <div style="margin-top: 5px; font-size: 0.9rem; color: #666; font-style: italic;">
+                                Embedding similarity to known crisis patterns
+                            </div>
+                        </div>
+
+                        <div class="component-card mistral">
+                            <div class="component-header">
+                                <span class="component-icon">🤖</span>
+                                <h4>Mistral Reasoner</h4>
+                                <span class="component-weight">Weight: 30%</span>
+                            </div>
+                            <div class="score-bar">
+                                <div class="score-fill mistral-fill" style="width: ${(details.mistral_score || 0) * 100}%"></div>
+                            </div>
+                            <strong>${details.mistral_score ? (details.mistral_score * 100).toFixed(1) + '%' : 'Timeout'}</strong>
+                            ${details.timeout_occurred ? '<div style="margin-top: 10px; padding: 8px; background: #fff3cd; border-radius: 6px; font-size: 0.9rem;">⏱️ Analysis timed out (graceful degradation)</div>' : ''}
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3>Reasoning Trace</h3>
+                        <div class="reasoning-box">${details.reasoning}</div>
+                    </div>
+
+                    <div>
+                        <h3>Performance: ${details.latency_ms}ms</h3>
+                    </div>
+
+                    <div>
+                        <h3>System Response to Student</h3>
+                        <div class="response-box">${data.response}</div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('resultsPanel').innerHTML = html;
+        }
+
+        // Allow Enter key to send
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

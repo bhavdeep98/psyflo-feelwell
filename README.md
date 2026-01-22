@@ -39,6 +39,30 @@ python evaluation/suites/reasoning_eval.py
 pytest tests/test_mistral_reasoner.py tests/test_clinical_metrics.py -v
 ```
 
+### Milestone 4: Conversational AI Agent
+
+```bash
+# Setup OpenAI API key
+cp backend/.env.example backend/.env
+# Edit backend/.env and add your OPENAI_API_KEY
+
+# Install dependencies
+pip install langchain langchain-openai langchain-core langgraph
+
+# Run conversation agent tests
+pytest tests/test_conversation_agent.py -v
+
+# Start backend
+cd backend
+uvicorn main:app --reload
+
+# Start frontend (in another terminal)
+cd frontend
+npm run dev
+```
+
+See [Conversation Setup Guide](docs/CONVERSATION_SETUP.md) for detailed instructions.
+
 ## Project Structure
 
 ```
